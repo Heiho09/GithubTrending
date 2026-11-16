@@ -1,0 +1,54 @@
+name: Weekly GitHub Trending
+
+on:
+  schedule:
+    - cron: '0 0 * * 1' # Monday 09:00 Asia/Seoul
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: weekly-trending
+  cancel-in-progress: false
+
+jobs:
+  digest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - run: python -m pip install -r requirements-dev.txt
+      - run: python -m unittest discover -s tests -v
+      - run: python weekly_trending.py
+      - name: Collect README evidence (no AI API)
+        run: |
+          report="reports/$(TZ=Asia/Seoul date +%G-W%V)-all.md"
+          python collect_evidence.py "$report"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: weekly-trending-report
+          path: |
+            reports/*.md
+            reports/*.pdf
+            collections/*.json
+          if-no-files-found: error
+      - name: Save report
+        env:
+          TARGET_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          git add reports/ collections/
+          if git diff --cached --quiet; then
+            echo "No new report to save."
+            exit 0
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'docs: add weekly GitHub Trending digest'
+          git push origin "HEAD:$TARGET_BRANCH"
